@@ -258,7 +258,7 @@ def ask_gemini(prompt: str, system: str = "") -> str:
     if not GEMINI_API_KEY:
         return "⚠️ Please add your GEMINI_API_KEY to `.streamlit/secrets.toml`."
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.1-pro-preview")
         full = f"{system}\n\n{prompt}" if system else prompt
         resp = model.generate_content(full)
         return resp.text
@@ -271,7 +271,7 @@ def ask_gemini_vision(prompt: str, image: Image.Image) -> str:
     if not GEMINI_API_KEY:
         return "⚠️ Please add your GEMINI_API_KEY to `.streamlit/secrets.toml`."
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-3.1-pro-preview")
         resp = model.generate_content([prompt, image])
         return resp.text
     except Exception as e:
