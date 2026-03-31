@@ -19,6 +19,23 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
+# ✅ FREE TIER MODELS ONLY — as of March 2026
+# ──────────────────────────────────────────────────────────
+# gemini-2.5-flash        → FREE: 10 req/min, 250 req/day  ✅ (used here)
+# gemini-2.5-pro          → FREE: 5 req/min,  100 req/day  ✅
+# gemini-2.5-flash-lite   → FREE: 15 req/min, 1000 req/day ✅
+# ──────────────────────────────────────────────────────────
+# gemini-3.1-pro-preview  → ❌ NO FREE TIER (limit=0) — paid only
+# gemini-1.5-flash        → ❌ DEPRECATED March 2026
+# gemini-2.0-flash        → ❌ RETIRED March 3, 2026
+# ──────────────────────────────────────────────────────────
+# ⚠️  IMPORTANT: quotas are per PROJECT, not per API key.
+#     Creating a new API key in the same Google project
+#     does NOT reset your quota — create a new project instead.
+# ──────────────────────────────────────────────────────────
+GEMINI_TEXT_MODEL   = "gemini-2.5-flash"
+GEMINI_VISION_MODEL = "gemini-2.5-flash"  # handles both text + vision/images
+
 # ── CUSTOM CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
@@ -253,29 +270,54 @@ if "solved_today" not in st.session_state:
     st.session_state.solved_today = 0
 
 
-# ── HELPER: GEMINI TEXT ────────────────────────────────────────────────────────
+# ── HELPER: FRIENDLY ERROR PARSER ────────────────────────────────────────────
+def _friendly_error(e: Exception) -> str:
+    msg = str(e)
+    if "429" in msg or "quota" in msg.lower() or "rate" in msg.lower():
+        return (
+            "⏳ **Rate limit reached.** Your free tier quota has been used up.\n\n"
+            "**Fix options:**\n"
+            "- Wait until midnight Pacific Time for daily quota reset\n"
+            "- Or go to [AI Studio](https://aistudio.google.com) → enable billing for Tier 1\n\n"
+            "_Free tier: gemini-2.5-flash = 10 req/min · 250 req/day_"
+        )
+    if "API_KEY" in msg or "api key" in msg.lower() or "invalid" in msg.lower():
+        return "🔑 **Invalid API key.** Check your key in the sidebar."
+    if "not found" in msg.lower() or "does not exist" in msg.lower():
+        return f"❌ **Model not found:** `{GEMINI_TEXT_MODEL}`. Check available models at AI Studio."
+    return f"❌ **Error:** {msg}"
+
+
+# ── HELPER: GEMINI TEXT ───────────────────────────────────────────────────────
+import time
+
 def ask_gemini(prompt: str, system: str = "") -> str:
     if not GEMINI_API_KEY:
-        return "⚠️ Please add your GEMINI_API_KEY to `.streamlit/secrets.toml`."
-    try:
-        model = genai.GenerativeModel("gemini-3.1-pro-preview")
-        full = f"{system}\n\n{prompt}" if system else prompt
-        resp = model.generate_content(full)
-        return resp.text
-    except Exception as e:
-        return f"Error: {e}"
+        return "⚠️ Please add your GEMINI_API_KEY to the sidebar or `.streamlit/secrets.toml`."
+    for attempt in range(2):
+        try:
+            model = genai.GenerativeModel(GEMINI_TEXT_MODEL)
+            full  = f"{system}\n\n{prompt}" if system else prompt
+            resp  = model.generate_content(full)
+            return resp.text
+        except Exception as e:
+            if attempt == 0 and "429" not in str(e):
+                time.sleep(2)
+                continue
+            return _friendly_error(e)
+    return "Unexpected error — please try again."
 
 
 # ── HELPER: GEMINI VISION (image + text) ─────────────────────────────────────
 def ask_gemini_vision(prompt: str, image: Image.Image) -> str:
     if not GEMINI_API_KEY:
-        return "⚠️ Please add your GEMINI_API_KEY to `.streamlit/secrets.toml`."
+        return "⚠️ Please add your GEMINI_API_KEY to the sidebar or `.streamlit/secrets.toml`."
     try:
-        model = genai.GenerativeModel("gemini-3.1-pro-preview")
-        resp = model.generate_content([prompt, image])
+        model = genai.GenerativeModel(GEMINI_VISION_MODEL)
+        resp  = model.generate_content([prompt, image])
         return resp.text
     except Exception as e:
-        return f"Error: {e}"
+        return _friendly_error(e)
 
 
 # ── HELPER: GEMINI IMAGE GEN ──────────────────────────────────────────────────
@@ -283,11 +325,18 @@ def generate_image_gemini(prompt: str):
     if not GEMINI_API_KEY:
         return None, "⚠️ Please add your GEMINI_API_KEY."
     try:
-        model = genai.ImageGenerationModel("imagen-3.0-generate-002")
+        model  = genai.ImageGenerationModel("imagen-3.0-generate-002")
         result = model.generate_images(prompt=prompt, number_of_images=1)
         return result.images[0]._pil_image, None
     except Exception as e:
-        return None, f"Image generation error: {e}"
+        msg = str(e)
+        if "billing" in msg.lower() or "403" in msg or "permission" in msg.lower():
+            return None, (
+                "🔒 **Imagen requires a paid Google Cloud account.**\n\n"
+                "Enable billing at [Google Cloud Console](https://console.cloud.google.com) "
+                "to unlock Imagen. All other tabs work on the free tier!"
+            )
+        return None, _friendly_error(e)
 
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
@@ -686,4 +735,3 @@ with tab5:
 
     except ImportError:
         st.error("Please install: `pip install numpy plotly`")
-
